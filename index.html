@@ -1,136 +1,136 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Graficador de Desigualdades Lineales</title>
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#f6f6f6;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
-  h2{margin:0 0 8px 0}
-  textarea{width:580px;height:90px;padding:8px;font-size:14px;border:1px solid #ccc;border-radius:8px;resize:none}
-  button{padding:8px 14px;border:none;border-radius:8px;background:#0077ff;color:#fff;font-weight:bold;cursor:pointer;transition:background .2s}
-  button:hover{background:#0059c9}
-  #canvas{border:1px solid #333;border-radius:8px;background:#fff}
-  .controls{display:flex;gap:8px}
-  label{font-size:14px;margin-bottom:4px;display:block}
-</style>
+<meta charset="UTF-8"/>
+<title>Graficador Profesional de Desigualdades</title>
+<!-- Tailwind vía CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.1/math.min.js"></script>
+<style>
+  canvas{background:#fff;border:1px solid #222;border-radius:0.75rem;touch-action:none}
+</style>
 </head>
-<body>
-  <h2>Graficador de Desigualdades Lineales (2 variables)</h2>
-  <label for="ineqInput">Escribe cada desigualdad en una línea. Ejemplos:<br>
-    <code>4*x+2*y<=100</code>, <code>x+3*y>=60</code>, <code>x>=0</code>, <code>y<=15</code></label>
-  <textarea id="ineqInput" placeholder="Ingresa desigualdades una por línea..."></textarea>
-  <div class="controls">
-    <button onclick="draw()">Graficar región factible</button>
-    <button onclick="zoom(10)">+</button>
-    <button onclick="zoom(-10)">-</button>
+<body class="bg-gray-100 p-6 flex flex-col items-center gap-4">
+  <h1 class="text-2xl font-bold">Graficador de Desigualdades Lineales</h1>
+
+  <!-- Inputs -->
+  <div class="grid grid-cols-2 gap-4 w-full max-w-xl">
+    <div class="flex flex-col gap-1">
+      <label class="text-sm font-semibold">Desigualdad&nbsp;1</label>
+      <input id="eq1" class="px-2 py-1 border rounded" placeholder="4*x+2*y<=100"/>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-sm font-semibold">Desigualdad&nbsp;2</label>
+      <input id="eq2" class="px-2 py-1 border rounded" placeholder="x+3*y>=60"/>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-sm font-semibold">Desigualdad&nbsp;3</label>
+      <input id="eq3" class="px-2 py-1 border rounded" placeholder="x>=0"/>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-sm font-semibold">Desigualdad&nbsp;4</label>
+      <input id="eq4" class="px-2 py-1 border rounded" placeholder="y<=15"/>
+    </div>
   </div>
-  <canvas id="canvas" width="600" height="600"></canvas>
-  <p style="font-size:13px;color:#555">La región amarilla corresponde al conjunto de puntos que cumplen simultáneamente todas las desigualdades.</p>
+
+  <!-- Botones -->
+  <div class="flex gap-3">
+    <button id="btnDraw" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow">Graficar región de solución</button>
+    <button id="zoomIn" class="bg-gray-700 text-white w-8 h-8 rounded">+</button>
+    <button id="zoomOut" class="bg-gray-700 text-white w-8 h-8 rounded">-</button>
+  </div>
+
+  <!-- Canvas -->
+  <canvas id="canvas" width="700" height="500"></canvas>
+  <p class="text-sm text-gray-600">Arrastra el lienzo para mover el plano. Usa + / – o rueda del ratón para acercar/alejar.</p>
 
 <script>
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const W = canvas.width, H = canvas.height;
-let scale = 40; // píxeles por unidad
+/* ------------------ Configuración base ------------------ */
+const canvas = document.getElementById('canvas');
+const ctx     = canvas.getContext('2d');
+let scale  = 40;             // píxeles por unidad
+let offset = {x: canvas.width/2, y: canvas.height/2}; // origen desplazado
 
-function origin(){ return {x:W/2, y:H/2}; }
+/* Convertir coordenadas cartesianas a pixel */
+const toPix   = (x,y)=>({x: offset.x + x*scale, y: offset.y - y*scale});
+const toCoord = (px,py)=>({x:(px-offset.x)/scale, y:(offset.y-py)/scale});
 
-/** Utilidad para parsear desigualdad y generar función evaluadora */
+/* ------------------ Parseo de desigualdades ------------------ */
 function parseIneq(str){
-  const ops = ["<=", ">=", "<", ">", "="];  
-  let opFound = ops.find(op=> str.includes(op));
-  if(!opFound) throw Error("Operador no reconocido en " + str);
-  const [lhs,rhs] = str.split(opFound);
-  const lhsJS = math.parse(lhs).toString();
-  const rhsJS = math.parse(rhs).toString();
-  // construimos una función booleana (x,y) => expr
-  const expr = `( ${lhsJS} ) - ( ${rhsJS} )`;
-  let cond;
-  switch(opFound){
-    case "<=": cond = `${expr} <= 1e-10`; break;
-    case "<":  cond = `${expr} < 0`; break;
-    case ">=": cond = `${expr} >= -1e-10`; break;
-    case ">":  cond = `${expr} > 0`; break;
-    case "=":  cond = `Math.abs(${expr}) < 1e-10`; break;
-  }
-  const testFunc = new Function("x","y",`return ${cond};`);
-  return {op:opFound,test:testFunc,raw:str};
+  const ops=["<=","<",">=",">","="]; let op=ops.find(o=>str.includes(o));
+  if(!op) throw `Operador no válido en: ${str}`;
+  const [lhs,rhs]=str.split(op);
+  const ex=`(${math.parse(lhs).toString()})-(${math.parse(rhs).toString()})`;
+  const test=(x,y)=>{const val=Function('x','y',`return ${ex}`)(x,y); switch(op){
+    case '<=':return val<=1e-9; case '<':return val<0; case '>=':return val>=-1e-9; case '>':return val>0; default:return Math.abs(val)<1e-9;} };
+  return {raw:str,test,op};
 }
 
-function clearCanvas(){
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle="#ffffff";
-  ctx.fillRect(0,0,W,H);
-  // grid
-  ctx.lineWidth=1;ctx.strokeStyle="#e9e9e9";
-  for(let x=0;x<=W;x+=scale){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
-  for(let y=0;y<=H;y+=scale){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
-  // axes
-  const o=origin();
-  ctx.strokeStyle="#000";ctx.lineWidth=1.5;
-  ctx.beginPath();ctx.moveTo(0,o.y);ctx.lineTo(W,o.y);ctx.moveTo(o.x,0);ctx.lineTo(o.x,H);ctx.stroke();
-  ctx.font="11px Arial";ctx.fillStyle="#000";
-  for(let i=-Math.floor(o.x/scale);i<=Math.floor((W-o.x)/scale);i++){if(i!==0)ctx.fillText(i,o.x+i*scale-5,o.y+12);}  
-  for(let i=-Math.floor(o.y/scale);i<=Math.floor((H-o.y)/scale);i++){if(i!==0)ctx.fillText(-i,o.x+5,o.y+i*scale+4);}  
+/* ------------------ Dibujo ------------------ */
+function clear(){ctx.clearRect(0,0,canvas.width,canvas.height);}
+function drawGrid(){
+  clear();
+  ctx.strokeStyle='#e5e5e5'; ctx.lineWidth=1;
+  for(let x=offset.x%scale; x<canvas.width; x+=scale){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}
+  for(let y=offset.y%scale; y<canvas.height; y+=scale){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}
+  // ejes
+  ctx.strokeStyle='#000'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(0,offset.y); ctx.lineTo(canvas.width,offset.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(offset.x,0); ctx.lineTo(offset.x,canvas.height); ctx.stroke();
 }
 
-function draw(){
-  const linesRaw = document.getElementById("ineqInput").value.split(/\n|;/).map(s=>s.trim()).filter(Boolean);
-  if(linesRaw.length===0){alert("Ingresa al menos una desigualdad");return;}
-  let ineqs=[];
-  try{ ineqs = linesRaw.map(parseIneq);}catch(e){alert(e.message);return;}
-  clearCanvas();
-  const o=origin();
-  // sombrear región factible evaluando cada pixel (paso grueso = 2px para rendimiento)
-  const step=2;
-  const imgData = ctx.getImageData(0,0,W,H);
-  const data = imgData.data;
-  for(let px=0; px<W; px+=step){
-    for(let py=0; py<H; py+=step){
-      const x = (px - o.x)/scale;
-      const y = (o.y - py)/scale;
-      const ok = ineqs.every(eq=>eq.test(x,y));
-      if(ok){
-        for(let dx=0;dx<step;dx++)for(let dy=0;dy<step;dy++){
-          const idx = ((py+dy)*W + (px+dx))*4;
-          data[idx]=255;      // R
-          data[idx+1]=255;    // G
-          data[idx+2]=150;    // B
-          data[idx+3]=120;    // alpha
-        }
-      }
+function shadeRegion(ineqs){
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d=img.data;
+  for(let px=0; px<canvas.width; px++){
+    for(let py=0; py<canvas.height; py++){
+      const {x,y}=toCoord(px,py);
+      if(ineqs.every(f=>f.test(x,y))){ const i=(py*canvas.width+px)*4; d[i]=255; d[i+1]=255; d[i+2]=180; d[i+3]=120; }
     }
   }
-  ctx.putImageData(imgData,0,0);
+  ctx.putImageData(img,0,0);
+}
 
-  // dibujar líneas frontera (sampleando puntos)
-  ineqs.forEach((ineq,i)=>{
-    ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=["#008000","#800080","#d00000","#0044aa"][i%4];
-    let started=false;
-    for(let px=0;px<=W;px++){
-      const x = (px - o.x)/scale;
-      // buscamos y que satisfaga igualdad aproximada
-      let found=false, pyFound=0;
-      for(let py=0;py<=H;py+=1){
-        const y = (o.y - py)/scale;
-        const diff = Math.abs( (Function("x","y","return ("+ineq.raw.replace(/<=|>=|=|<|>/,"-")+ ")")(x,y)) );
-        if(diff<1e-2){found=true;pyFound=py;break;}
-      }
-      if(found){
-        if(!started){ctx.moveTo(px,pyFound);started=true;}else{ctx.lineTo(px,pyFound);}
+function drawLines(ineqs){
+  const colors=['#008000','#800080','#d00000','#0044aa'];
+  ineqs.forEach((iq,idx)=>{
+    if(!iq.op.includes('=')) return; // solo líneas con '=' dibujadas exactamente se mostrarán (<=,>=,<,> también incluyen frontera)
+    ctx.strokeStyle=colors[idx%colors.length]; ctx.lineWidth=2; ctx.beginPath(); let started=false;
+    for(let px=0; px<canvas.width; px+=1){
+      // hallar py que satisface igualdad aproximada
+      for(let py=0; py<canvas.height; py+=1){
+        const {x,y}=toCoord(px,py);
+        if(Math.abs(Function('x','y',`return (${math.parse(iq.raw.split(iq.op)[0]).toString()})-(${math.parse(iq.raw.split(iq.op)[1]).toString()})`)(x,y))<1e-2){
+          if(!started){ctx.moveTo(px,py); started=true;} else ctx.lineTo(px,py); break;
+        }
       }
     }
     ctx.stroke();
   });
 }
 
-function zoom(delta){
-  scale = Math.max(10,scale+delta);
-  draw();
+function plot(){
+  const inputs=[eq1.value,eq2.value,eq3.value,eq4.value].map(s=>s.trim()).filter(Boolean);
+  if(!inputs.length) return alert('Introduce al menos una desigualdad');
+  let ineqs=[]; try{ineqs=inputs.map(parseIneq);}catch(e){return alert(e);}  
+  drawGrid(); shadeRegion(ineqs); drawLines(ineqs);
 }
 
-clearCanvas();
+/* ------------------ Interacciones ------------------ */
+document.getElementById('btnDraw').onclick=plot;
+
+document.getElementById('zoomIn').onclick=()=>{scale=Math.min(scale+10,120);plot();};
+document.getElementById('zoomOut').onclick=()=>{scale=Math.max(scale-10,10);plot();};
+
+// Pan con arrastre
+let dragging=false, start={x:0,y:0}, startOff={x:0,y:0};
+canvas.addEventListener('pointerdown',e=>{dragging=true;start={x:e.clientX,y:e.clientY};startOff={...offset};canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{if(!dragging) return; offset.x=startOff.x+(e.clientX-start.x); offset.y=startOff.y+(e.clientY-start.y); drawGrid(); plot();});
+canvas.addEventListener('pointerup',()=>dragging=false);
+canvas.addEventListener('wheel',e=>{e.preventDefault(); const delta=e.deltaY>0?-10:10; scale=Math.max(10,Math.min(120,scale+delta)); plot();});
+
+// Inicial
+drawGrid();
 </script>
 </body>
 </html>
